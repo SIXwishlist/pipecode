@@ -1,22 +1,20 @@
 <?
 //
 // Pipecode - distributed social network
-// Copyright (C) 2014 Bryan Beicker <bryan@pipedot.org>
+// Copyright (C) 2014-2015 Bryan Beicker <bryan@pipedot.org>
 //
-// This file is part of Pipecode.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 //
-// Pipecode is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Pipecode is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU General Public License
-// along with Pipecode.  If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
 function get_captcha()
@@ -45,10 +43,10 @@ function get_captcha()
 	}
 	$answer = trim($answer);
 
-	$row = run_sql("select captcha_id from captcha where question = ?", array($question));
+	$row = sql("select captcha_id from captcha where question = ?", $question);
 	if (count($row) == 0) {
-		run_sql("insert into captcha (question, answer) values (?, ?)", array($question, $answer));
-		$row = run_sql("select captcha_id from captcha where question = ?", array($question));
+		sql("insert into captcha (question, answer) values (?, ?)", $question, $answer);
+		$row = sql("select captcha_id from captcha where question = ?", $question);
 	}
 
 	return array($row[0]["captcha_id"], $question, $answer);
@@ -57,11 +55,11 @@ function get_captcha()
 
 function get_captcha_fallback()
 {
-	$row = run_sql("select min(captcha_id) as min_id, max(captcha_id) as max_id from captcha");
+	$row = sql("select min(captcha_id) as min_id, max(captcha_id) as max_id from captcha");
 	$min_id = $row[0]["min_id"];
 	$max_id = $row[0]["max_id"];
 	$captcha_id = rand($min_id, $max_id);
-	$row = run_sql("select captcha_id, question, answer from captcha where captcha_id = ?", array($captcha_id));
+	$row = sql("select captcha_id, question, answer from captcha where captcha_id = ?", $captcha_id);
 
 	return array($row[0]["captcha_id"], $row[0]["question"], $row[0]["answer"]);
 }

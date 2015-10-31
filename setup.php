@@ -1,26 +1,24 @@
 <?
 //
 // Pipecode - distributed social network
-// Copyright (C) 2014 Bryan Beicker <bryan@pipedot.org>
+// Copyright (C) 2014-2015 Bryan Beicker <bryan@pipedot.org>
 //
-// This file is part of Pipecode.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 //
-// Pipecode is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Pipecode is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU General Public License
-// along with Pipecode.  If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-if (is_file("$top_root/conf.php")) {
-	die("already setup");
+if (is_file("$doc_root/conf.php")) {
+	fatal("Already setup");
 }
 
 if (http_post()) {
@@ -61,7 +59,7 @@ if (http_post()) {
 	$s .= "\$memcache_server = \"\";\n";
 	$s .= "\n";
 	$s .= "\$auth_key = \"" . random_hash() . "\";\n";
-	$s .= "\$auth_expire = 86400 * 365;\n";
+	$s .= "\$auth_expire = DAYS * 365;\n";
 	$s .= "\n";
 	$s .= "\$captcha_key = \"$captcha_key\";\n";
 	$s .= "\n";
@@ -73,21 +71,21 @@ if (http_post()) {
 	$sql_open = false;
 	open_database();
 
-	fs_slap("$top_root/conf.php", $s);
+	fs_slap("$doc_root/conf.php", $s);
 
 	if (!db_has_database($sql_database)) {
-		run_sql("create database $sql_database");
-		run_sql("use $sql_database");
-		run_sql_file("$top_root/schema.sql");
-		run_sql_file("$top_root/default.sql");
+		sql("create database $sql_database");
+		sql("use $sql_database");
+		run_sql_file("$doc_root/schema.sql");
+		//run_sql_file("$doc_root/default.sql");
 
 		$zid = "$admin_username@$server_name";
 		$salt = random_hash();
 		$pass = crypt_sha256("$admin_password$salt");
-		run_sql("insert into user_conf (zid, name, value) values (?, ?, ?)", array($zid, "admin", "1"));
-		run_sql("insert into user_conf (zid, name, value) values (?, ?, ?)", array($zid, "editor", "1"));
-		run_sql("insert into user_conf (zid, name, value) values (?, ?, ?)", array($zid, "password", $pass));
-		run_sql("insert into user_conf (zid, name, value) values (?, ?, ?)", array($zid, "salt", $salt));
+		sql("insert into user_conf (zid, name, value) values (?, ?, ?)", $zid, "admin", "1");
+		sql("insert into user_conf (zid, name, value) values (?, ?, ?)", $zid, "editor", "1");
+		sql("insert into user_conf (zid, name, value) values (?, ?, ?)", $zid, "password", $pass);
+		sql("insert into user_conf (zid, name, value) values (?, ?, ?)", $zid, "salt", $salt);
 	}
 
 	header("Location: /");
@@ -99,12 +97,12 @@ writeln('<html>');
 writeln('<head>');
 writeln('<title>Pipecode Setup</title>');
 writeln('<meta http-equiv="Content-type" content="text/html;charset=UTF-8">');
-writeln('<link rel="stylesheet" href="/style.css" type="text/css"/>');
+writeln('<link rel="stylesheet" href="/style.css" type="text/css">');
 writeln('</head>');
 writeln('<body>');
-writeln('<img alt="Pipecode" src="/images/logo-top.png" style="margin-bottom: 8px"/>');
+writeln('<img alt="Pipecode" class="box" src="/images/logo-top.png">');
 
-writeln('<form method="post">');
+beg_form();
 
 beg_tab();
 print_row(array("caption" => "Server Name", "text_key" => "server_name", "text_value" => "example.com"));
@@ -132,12 +130,12 @@ print_row(array("caption" => "CAPTCHA API Key", "text_key" => "captcha_key", "te
 end_tab();
 
 beg_tab();
-print_row(array("caption" => "Admin Username", "text_key" => "admin_username", "text_value" => "myname"));
+print_row(array("caption" => "Admin Username", "text_key" => "admin_username", "text_value" => "admin"));
 print_row(array("caption" => "Admin Password", "text_key" => "admin_password", "text_value" => "crunchyfrog"));
 end_tab();
 
-right_box("Save");
+box_right("Save");
 
-writeln('</form>');
-writeln('</body>');
-writeln('</html>');
+end_form();
+
+print_footer();

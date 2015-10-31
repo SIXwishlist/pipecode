@@ -1,29 +1,28 @@
 <?
 //
 // Pipecode - distributed social network
-// Copyright (C) 2014 Bryan Beicker <bryan@pipedot.org>
+// Copyright (C) 2014-2015 Bryan Beicker <bryan@pipedot.org>
 //
-// This file is part of Pipecode.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 //
-// Pipecode is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Pipecode is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU General Public License
-// along with Pipecode.  If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
 include("../include/common.php");
-
-if (!string_uses($request_script, "[a-z][0-9]_-/")) {
-	die("invalid request [$request_script]");
-}
+include("geoip.php");
+include("link.php");
+include("notification.php");
+include("render.php");
+include("stream.php");
 
 $a = explode("/", $request_script);
 if (count($a) >= 2) {
@@ -41,32 +40,96 @@ if (count($a) >= 4) {
 } else {
 	$s3 = "";
 }
-
-if ($user_page == "") {
-	$root = $main_root;
+if (count($a) >= 5) {
+	$s4 = $a[4];
 } else {
-	$root = $user_root;
+	$s4 = "";
 }
 
-if ($s1 == "") {
+if (http_post()) {
+	$root = "$doc_root/post/";
+} else {
+	$root = "$doc_root/get/";
+}
+if ($user_page === "") {
+	$root .= "main";
+} else {
+	$root .= "user";
+}
+
+if ($s1 === "drive") {
+	if (!string_uses($request_script, "[A-Z][a-z][0-9]`~!@#\$%^&()_+-=[]{};',./ ")) {
+		fatal("Invalid drive request");
+	}
+	include("drive.php");
+	$path = decode_file_name(substr($request_script, 6));
+	if (string_uses($query, "[a-z]")) {
+		if (fs_is_file("$root/$s1/$query.php")) {
+			include("$root/$s1/$query.php");
+			die();
+		} else {
+			fatal("Unknown action");
+		}
+	}
+	if (substr($request_script, -1) !== "/") {
+		header("Location: $request_script/");
+		die();
+	}
+	include("$root/$s1/index.php");
+	die();
+} else if (!string_uses($request_script, "[A-Z][a-z][0-9]_-./+")) {
+	fatal("Invalid request");
+}
+
+if ($s1 === "") {
 	include("$root/index.php");
 	die();
 }
 if (fs_is_file("$root/$s1.php")) {
 	include("$root/$s1.php");
 	die();
-} else if (fs_is_dir("$root/$s1")) {
-	if ($s2 == "") {
+}
+if (fs_is_dir("$root/$s1")) {
+	if ($s2 === "") {
 		if (fs_is_file("$root/$s1/index.php")) {
-			include("$root/$s1/index.php");
+			if (substr($request_script, -1) != "/") {
+				header("Location: $request_script/");
+			} else {
+				include("$root/$s1/index.php");
+			}
 			die();
 		}
 	} else {
+		if (fs_is_dir("$root/$s1/$s2")) {
+			if ($s3 === "") {
+				if (fs_is_file("$root/$s1/$s2/index.php")) {
+					if (substr($request_script, -1) != "/") {
+						header("Location: $request_script/");
+					} else {
+						include("$root/$s1/$s2/index.php");
+					}
+					die();
+				}
+			} else {
+				if (fs_is_file("$root/$s1/$s2/$s3.php")) {
+					include("$root/$s1/$s2/$s3.php");
+					die();
+				}
+				if ($s4 !== "" && fs_is_file("$root/$s1/$s2/$s4.php")) {
+					include("$root/$s1/$s2/$s4.php");
+					die();
+				}
+				if (fs_is_file("$root/$s1/$s2/root.php")) {
+					include("$root/$s1/$s2/root.php");
+					die();
+				}
+			}
+		}
 		if (fs_is_file("$root/$s1/$s2.php")) {
 			include("$root/$s1/$s2.php");
 			die();
 		}
-		if ($s3 != "" && fs_is_file("$root/$s1/$s3.php")) {
+		if ($s3 !== "" && fs_is_file("$root/$s1/$s3.php")) {
 			include("$root/$s1/$s3.php");
 			die();
 		}
@@ -77,10 +140,29 @@ if (fs_is_file("$root/$s1.php")) {
 	}
 }
 
-http_response_code(404);
-print_header();
+$slug = substr($request_uri, 1);
+if (string_uses($slug, "[A-Z][a-z][0-9]-_.")) {
+	if (db_has_rec("page", $slug)) {
+		$page = db_get_rec("page", $slug);
+		print_header($page["title"]);
+		beg_main("static");
+		writeln($page["body"]);
+		end_main();
+		print_footer();
+		die();
+	}
+}
 
-writeln('<h1>404</h1>');
-writeln('request_uri [' . $request_uri . ']');
+if (string_uses($slug, "[A-Z][a-z][0-9]")) {
+	short_redirect($slug);
+}
 
-print_footer();
+if (substr($slug, -1) === "+") {
+	$slug = substr($slug, 0, -1);
+	if (string_uses($slug, "[A-Z][a-z][0-9]")) {
+		include("$root/short.php");
+		die();
+	}
+}
+
+fatal("Not Found", "stop", "Not Found", "Unable to find the requested page.", 404);

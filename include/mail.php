@@ -1,25 +1,23 @@
 <?
 //
 // Pipecode - distributed social network
-// Copyright (C) 2014 Bryan Beicker <bryan@pipedot.org>
+// Copyright (C) 2014-2015 Bryan Beicker <bryan@pipedot.org>
 //
-// This file is part of Pipecode.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 //
-// Pipecode is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Pipecode is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU General Public License
-// along with Pipecode.  If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
 
-include("$top_root/lib/phpmailer/class.phpmailer.php");
+include("$doc_root/lib/phpmailer/class.phpmailer.php");
 
 
 function send_mail($email, $subject, $body)
@@ -108,10 +106,10 @@ function send_web_mail($to, $subject, $body, $in_reply_to = "", $sent = true)
 	global $server_name;
 	global $server_title;
 
-	if ($auth_user["real_name"] == "") {
+	if (!$auth_user["show_name_enabled"] || $auth_user["display_name"] == "") {
 		$from = "<$auth_zid>";
 	} else {
-		$from = $auth_user["real_name"] . " <$auth_zid>";
+		$from = $auth_user["display_name"] . " <$auth_zid>";
 	}
 	if (!$sent) {
 		$from = "$server_title <no-reply@$server_name>";
@@ -163,25 +161,35 @@ function send_web_mail($to, $subject, $body, $in_reply_to = "", $sent = true)
 function print_mail_dir($location)
 {
 	global $auth_zid;
+	global $zid;
 
-	print_header($location, array("Compose"), array("mail-compose"), array("/mail/compose"));
+	require_mine();
 
+	print_header($location, ["Compose"], ["mail-compose"], ["/mail/compose"], ["Mail", $location], ["/mail/", strtolower("/mail/$location/")]);
+
+	beg_main();
 	writeln('<table class="fill">');
 	writeln('<tr>');
 	writeln('<td style="vertical-align: top">');
 
 	beg_tab();
 	writeln('	<tr>');
-	writeln('		<td><a href="/mail/" class="icon_16" style="background-image: url(/images/inbox-16.png)">Inbox</a></td>');
+	writeln('		<td><a href="/mail/inbox/" class="icon-16 inbox-16">Inbox</a></td>');
 	writeln('	</tr>');
 	writeln('	<tr>');
-	writeln('		<td><a href="/mail/sent" class="icon_16" style="background-image: url(/images/sent-16.png)">Sent</a></td>');
+	writeln('		<td><a href="/mail/drafts/" class="icon-16 accessories-16">Drafts</a></td>');
 	writeln('	</tr>');
 	writeln('	<tr>');
-	writeln('		<td><a href="/mail/junk" class="icon_16" style="background-image: url(/images/junk-16.png)">Junk</a></td>');
+	writeln('		<td><a href="/mail/junk/" class="icon-16 junk-16">Junk</a></td>');
 	writeln('	</tr>');
 	writeln('	<tr>');
-	writeln('		<td><a href="/mail/trash" class="icon_16" style="background-image: url(/images/trash-16.png)">Trash</a></td>');
+	writeln('		<td><a href="/mail/outbox/" class="icon-16 send-16">Outbox</a></td>');
+	writeln('	</tr>');
+	writeln('	<tr>');
+	writeln('		<td><a href="/mail/sent/" class="icon-16 sent-16">Sent</a></td>');
+	writeln('	</tr>');
+	writeln('	<tr>');
+	writeln('		<td><a href="/mail/trash/" class="icon-16 trash-16">Trash</a></td>');
 	writeln('	</tr>');
 	end_tab();
 
@@ -208,11 +216,11 @@ function print_mail_dir($location)
 		}
 
 		writeln('	<tr>');
-		writeln('		<td><a href="view?mid=' . $message["mail_id"] . '" class="icon_16" style="background-image: url(/images/mail-16.png)">' . $message["subject"] . '</a></td>');
+		writeln('		<td><a href="/mail/view/' . $message["mail_id"] . '" class="icon-16 mail-16">' . $message["subject"] . '</a></td>');
 		if (string_has($address["email"], "no-reply@")) {
 			writeln('		<td class="center">' . $address["email"] . '</td>');
 		} else {
-			writeln('		<td class="center"><a href="compose?to=' . $address["email"] . '">' . $address["email"] . '</a></td>');
+			writeln('		<td class="center"><a href="/mail/compose?to=' . $address["email"] . '">' . $address["email"] . '</a></td>');
 		}
 		writeln('		<td class="right">' . date("Y-m-d H:i", $message["received_time"]) . '</td>');
 		writeln('	</tr>');
@@ -224,24 +232,85 @@ function print_mail_dir($location)
 	writeln('</table>');
 
 	if (count($list) > 0) {
-		writeln('<form method="post">');
+		beg_form();
 		if ($location == "Junk" || $location == "Trash") {
-			right_box("Empty");
+			box_right("Empty");
 		} else {
-			right_box("Delete All");
+			box_right("Delete All");
 		}
-		writeln('</form>');
+		end_form();
 	}
 
+	end_main();
 	print_footer();
 }
 
 
 function format_text_mail($body)
 {
+	$body = htmlentities($body);
 	$body = str_replace("\r", "", $body);
-	$body = str_replace("\n", "<br/>", $body);
+	$body = str_replace("\n", "<br>", $body);
 	$body = preg_replace('@(https?://([-\w\.]+[-\w])+(:\d+)?(/([\w/_\.#-]*(\?\S+)?[^\.\s<])?)?)@', '<a href="$1">$1</a>', $body);
 
 	return $body;
+}
+
+
+function send_notifications($comment)
+{
+	global $server_name;
+	global $auth_zid;
+
+	$new_subject = $comment["subject"];
+	$new_comment_id = $comment["comment_id"];
+	$new_comment_code = crypt_crockford_encode($new_comment_id);
+	$new_zid = $comment["zid"];
+	if ($new_zid == "") {
+		$new_zid = "Anonymous Coward";
+	}
+	$parent_id = $comment["parent_id"];
+	$article_id = $comment["article_id"];
+
+	$sent_list = array();
+
+	while ($parent_id != 0) {
+		$comment = db_get_rec("comment", $parent_id);
+		$parent_code = crypt_crockford_encode($comment["comment_id"]);
+		$zid = $comment["zid"];
+		if ($zid != "" && $zid != $auth_zid && !in_array($zid, $sent_list)) {
+//			$a = article_info($comment);
+//			$subject = 'Reply to "' . $comment["subject"] . '" by ' . $new_zid;
+//			$body = "Your comment has a new reply.\n";
+//			$body .= "\n";
+//			$body .= "In the " . $a["type_id"] . ":\n";
+//			$body .= htmlspecialchars_decode($a["title"]) . "\n";
+//			$body .= $a["link"] . "\n";
+//			$body .= "\n";
+//			$body .= "Your original comment:\n";
+//			$body .= $comment["subject"] . "\n";
+//			$body .= "https://$server_name/comment/$parent_code\n";
+//			$body .= "\n";
+//			$body .= "The new reply:\n";
+//			$body .= "$new_subject\n";
+//			$body .= "https://$server_name/comment/$new_comment_code\n";
+//			$body .= "\n";
+//			send_web_mail($zid, $subject, $body, "", false);
+
+			send_notification_comment($new_comment_id, $comment["comment_id"], $zid);
+			$sent_list[] = $zid;
+		}
+
+		$parent_id = $comment["parent_id"];
+	}
+
+	$short = db_get_rec("short", $article_id);
+	$article_type_id = $short["type_id"];
+	if ($article_type_id == TYPE_JOURNAL) {
+		$journal = db_get_rec("journal", $article_id);
+		$zid = $journal["zid"];
+		if (!in_array($zid, $sent_list) && $zid != $auth_zid) {
+			send_notification_comment($new_comment_id, $article_id, $zid);
+		}
+	}
 }

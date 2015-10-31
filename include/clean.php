@@ -1,40 +1,42 @@
 <?
 //
 // Pipecode - distributed social network
-// Copyright (C) 2014 Bryan Beicker <bryan@pipedot.org>
+// Copyright (C) 2014-2015 Bryan Beicker <bryan@pipedot.org>
 //
-// This file is part of Pipecode.
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
 //
-// Pipecode is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Pipecode is distributed in the hope that it will be useful,
+// This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// GNU Affero General Public License for more details.
 //
-// You should have received a copy of the GNU General Public License
-// along with Pipecode.  If not, see <http://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
+
+include("$doc_root/lib/htmlpurifier/HTMLPurifier.standalone.php");
+
 
 function mb_ord($u) {
-	$k = mb_convert_encoding($u, 'UCS-2LE', 'UTF-8');
+	$k = mb_convert_encoding($u, 'UCS-4LE', 'UTF-8');
 	$k1 = ord(substr($k, 0, 1));
 	$k2 = ord(substr($k, 1, 1));
+	$k3 = ord(substr($k, 2, 1));
+	$k4 = ord(substr($k, 3, 1));
 
-	return $k2 * 256 + $k1;
+	return $k4 * 16777216 + $k3 * 65536 + $k2 * 256 + $k1;
 }
 
 
 function clean_character($c)
 {
 	$n = mb_ord($c);
-	//writeln("c [$c] n [$n]");
 
 	// Basic Latin
-	if ($n >= 21 && $n <= 126) {
+	if ($n >= 32 && $n <= 126) {
 		return true;
 	}
 
@@ -184,146 +186,77 @@ function clean_unicode($dirty)
 }
 
 
-function clean_tag($tag)
+function clean_html($dirty, $definition = "comment")
 {
-	$clean = "";
-	$tag = trim($tag);
+	global $server_name;
 
-	if (substr($tag, 0, 1) == "/") {
-		$end = true;
-		$tag = substr($tag, 1);
+	$dirty = clean_unicode($dirty);
+	$dirty = str_replace("&nbsp;", " ", $dirty);
+
+	$config = HTMLPurifier_Config::createDefault();
+	$config->set('HTML.DefinitionID', $definition);
+	$config->set('HTML.DefinitionRev', 1);
+	$config->set('Cache.DefinitionImpl', null); // TODO: remove this later!
+	if ($definition == "page") {
+		$config->set('HTML.Allowed', 'a[href],b,br,blockquote,i,img[src],li,ol,pre,q,s,sub,sup,u,ul,p,table,tr,td');
+	} else if ($definition == "journal") {
+		$config->set('HTML.Allowed', 'a[href],b,br,blockquote,i,img[src],li,ol,pre,q,s,sub,sup,u,ul');
+	} else if ($definition == "article") {
+		$config->set('HTML.Allowed', 'a[href],b,br,blockquote,i,img[src],li,ol,pre,q,s,sub,sup,u,ul,p,table,tr,th,td');
+	} else if ($definition == "text") {
+		$config->set('HTML.Allowed', '');
 	} else {
-		$end = false;
+		$config->set('HTML.Allowed', 'a[href],b,br,blockquote,i,li,ol,q,s,sub,sup,u,ul');
+	}
+	if ($definition == "text") {
+		$config->set('Core.HiddenElements', array("sub" => true, "sup" => true));
+	} else {
+		if ($definition != "story") {
+			$config->set('HTML.Nofollow', true);
+		}
+		$config->set('Output.SortAttr', true);
+		$config->set('AutoFormat.Linkify', true);
 	}
 
-	$type = string_next($tag, " ");
-	//print "type [$type]\n";
+	// FIXME: this should match subdomains, but doesn't seem to work
+	// Ideally, subdomains of $server_name wouldn't get nofollow links
+	$config->set('URI.Host', $server_name);
+	//$config->set('URI.Base', $server_name);
+	//$config->set('URI.MakeAbsolute', true);
 
-	if ($type == "br") {
-		return "<br/>";
-	}
-	if ($type == "b" || $type == "i" || $type == "u" || $type == "s" || $type == "q" || $type == "strong" || $type == "em") {
-		if ($type == "strong") {
-			$type = "b";
-		} else if ($type == "em") {
-			$type = "i";
-		}
-		if ($end) {
-			return "</$type>FORCEWHITESPACE";
-		} else {
-			return "FORCEWHITESPACE<$type>";
-		}
-	}
-	//if ($type == "p"  || $type == "ol" || $type == "ul" || $type == "li" || $type == "pre") {
-	//if ($type == "pre") {
-	if ($type == "ol" || $type == "ul" || $type == "li" || $type == "pre" || $type == "blockquote") {
-		if ($end) {
-			return "</$type>";
-		} else {
-			return "<$type>";
-		}
-	}
-	if ($type == "a") {
-		if ($end) {
-			if ($type == "a") {
-				return "</a>FORCEWHITESPACE";
-			} else {
-				return "</$type>";
-			}
-		}
-		$tag = str_replace(" ", "", $tag);
-		$tag = str_replace("\"", "\" ", $tag);
-		$tag = str_replace("=\" ", "=\"", $tag);
-		$tag = trim($tag);
-		$map_old = map_from_tag_string($tag);
-		$map_new = array();
-		if ($type == "a") {
-			$map_new["href"] = @$map_old["href"];
-		}
-		if (count($map_new) == 0) {
-			return "<$type>";
-		} else {
-			if ($type == "a") {
-				return "FORCEWHITESPACE<$type " . map_to_tag_string($map_new) . ">";
-			} else {
-				return "<$type " . map_to_tag_string($map_new) . ">";
-			}
-		}
-	}
+	$purifier = new HTMLPurifier($config);
+	$clean = $purifier->purify($dirty);
 
-	return "";
-}
-
-
-function clean_html($html)
-{
-	$clean = "";
-	$pre = 0;
-
-	$html = clean_unicode($html);
-
-	for ($i = 0; $i < mb_strlen($html); $i++) {
-		//$c = substr($html, $i, 1);
-		$c = mb_substr($html, $i, 1);
-		if ($c == "<") {
-			$s = "";
-			for ($i = $i + 1; $i < mb_strlen($html); $i++) {
-				//$c = substr($html, $i, 1);
-				$c = mb_substr($html, $i, 1);
-				if ($c == ">") {
-					break;
-				}
-				$s .= $c;
-			}
-			$tag = clean_tag($s);
-			if ($tag == "<pre>") {
-				$pre++;
-			} else if ($tag == "</pre>") {
-				$pre--;
-			}
-			$clean .= $tag;
-		} else {
-			//if ($pre > 0 && $c == "\n") {
-			//	$clean .= "<br/>";
-			//} else {
-				$clean .= $c;
-			//}
-		}
-	}
-
-	$clean = str_replace("\t", " ", $clean);
-	$clean = str_replace("\n", " ", $clean);
-	$clean = str_replace("\r", " ", $clean);
-
-	while (string_has($clean, "  ")) {
-		$clean = str_replace("  ", " ", $clean);
-	}
-
-	$clean = str_replace("> ", ">", $clean);
-	$clean = str_replace(" <", "<", $clean);
-	$clean = str_replace("FORCEWHITESPACE", " ", $clean);
-	$clean = trim($clean);
-	$clean = str_replace_all("  ", " ", $clean);
-	$clean = str_replace_all("<br/><br/><br/>", "<br/><br/>", $clean);
-
-//	print "clean [$clean]";
-//	$clean = str_replace("<pre><br/>", "<pre>", $clean);
-//	$clean = str_replace("<br/></pre>", "</pre>", $clean);
-//	$clean = str_replace("<li><br/>", "<li>", $clean);
-//	$clean = str_replace("<br/></li>", "</li>", $clean);
-//	$clean = str_replace("<ul><br/>", "<ul>", $clean);
-//	$clean = str_replace("<br/></ul>", "</ul>", $clean);
-//	$clean = str_replace("<ol><br/>", "<ol>", $clean);
-//	$clean = str_replace("<br/></ol>", "</ol>", $clean);
-//	print "clean2 [$clean]";
+	$clean = str_replace("<br />", "<br>", $clean);
+	$clean = str_replace("<br/>", "<br>", $clean);
 	$clean = clean_newlines("pre", $clean);
 	$clean = clean_newlines("ol", $clean);
 	$clean = clean_newlines("ul", $clean);
 	$clean = clean_newlines("li", $clean);
 	$clean = clean_newlines("blockquote", $clean);
 
+	$clean = clean_spaces("b", $clean);
+	$clean = clean_spaces("i", $clean);
+	$clean = clean_spaces("u", $clean);
+	$clean = clean_spaces("s", $clean);
+	$clean = clean_spaces("q", $clean);
+	$clean = clean_spaces("p", $clean);
+	$clean = clean_spaces("li", $clean);
+	$clean = clean_spaces("td", $clean);
+	$clean = clean_spaces("blockquote", $clean);
+
+	$clean = str_replace("<li></li>", "", $clean);
 	$clean = clean_entities($clean);
-	$clean = make_clickable($clean);
+	$clean = string_replace_all("  ", " ", $clean);
+	$clean = trim($clean);
+
+	while (substr($clean, 0, 4) == "<br>") {
+		$clean = trim(substr($clean, 4));
+	}
+	while (substr($clean, -4, 4) == "<br>") {
+		$clean = trim(substr($clean, 0, -4));
+	}
+	$clean = string_replace_all("<br><br><br>", "<br><br>", $clean);
 
 	return $clean;
 }
@@ -331,14 +264,20 @@ function clean_html($html)
 
 function dirty_html($clean)
 {
-	$dirty = str_replace("<br/>", "\n", $clean);
+	$dirty = str_replace("<br>", "\n", $clean);
 	$dirty = str_replace("<blockquote>", "\n<blockquote>", $dirty);
 	$dirty = str_replace("</blockquote>", "</blockquote>\n", $dirty);
 	$dirty = str_replace("<ol>", "\n<ol>", $dirty);
-	$dirty = str_replace("</ol>", "\n</ol>", $dirty);
+	$dirty = str_replace("</ol>", "\n</ol>\n", $dirty);
 	$dirty = str_replace("<ul>", "\n<ul>", $dirty);
-	$dirty = str_replace("</ul>", "\n</ul>", $dirty);
+	$dirty = str_replace("</ul>", "\n</ul>\n", $dirty);
 	$dirty = str_replace("<li>", "\n<li>", $dirty);
+	$dirty = str_replace("&lt;", "&amp;lt;", $dirty);
+	$dirty = str_replace("&gt;", "&amp;gt;", $dirty);
+
+	$dirty = str_replace("</blockquote>\n\n", "</blockquote>\n", $dirty);
+	$dirty = str_replace("</ol>\n\n", "</ol>\n", $dirty);
+	$dirty = str_replace("</ul>\n\n", "</ul>\n", $dirty);
 
 	return $dirty;
 }
@@ -349,19 +288,22 @@ function clean_newlines($tag, $text)
 	$beg_tag = "<$tag>";
 	$end_tag = "</$tag>";
 
-	$text = str_replace_all("$beg_tag<br/>", $beg_tag, $text);
-	$text = str_replace_all("<br/>$beg_tag", $beg_tag, $text);
-	$text = str_replace_all("$end_tag<br/>", $end_tag, $text);
-	$text = str_replace_all("<br/>$end_tag", $end_tag, $text);
+	$text = string_replace_all("$beg_tag<br>", $beg_tag, $text);
+	$text = string_replace_all("<br>$beg_tag", $beg_tag, $text);
+	$text = string_replace_all("$end_tag<br>", $end_tag, $text);
+	$text = string_replace_all("<br>$end_tag", $end_tag, $text);
 
 	return $text;
 }
 
 
-function make_clickable($text)
+function clean_spaces($tag, $text)
 {
-	$text = preg_replace("/(?<!a href=\")(?<!src=\")((http|ftp)+(s)?:\/\/[^<>\s]+)/i", "<a href=\"\\0\">\\0</a>", $text);
-	$text = preg_replace( '#(<a([ \r\n\t]+[^>]+?>|>))<a [^>]+?>([^>]+?)</a></a>#i', "$1$3</a>", $text);
+	$beg_tag = "<$tag>";
+	$end_tag = "</$tag>";
+
+	$text = string_replace_all("$beg_tag ", $beg_tag, $text);
+	$text = string_replace_all(" $end_tag", $end_tag, $text);
 
 	return $text;
 }
@@ -655,4 +597,204 @@ function clean_entities($dirty)
 	}
 
 	return $s;
+}
+
+
+function clean_text($text, $max = 200, $min = 1)
+{
+	$text = htmlspecialchars($text);
+	$text = clean_unicode($text);
+	$text = clean_entities($text);
+	$text = string_replace_all("  ", " ", trim($text));
+
+	if (strlen($text) > $max) {
+		$subject = substr($text, 0, $max);
+	}
+	if (strlen($text) < $min) {
+		fatal("Missing text field");
+	}
+
+	return $text;
+}
+
+
+function clean_subject()
+{
+	if (array_key_exists("subject", $_POST)) {
+		$subject = $_POST["subject"];
+	} else if (array_key_exists("title", $_POST)) {
+		$subject = $_POST["title"];
+	} else {
+		fatal("No subject");
+	}
+
+	return clean_text($subject);
+}
+
+
+function clean_topic()
+{
+	if (array_key_exists("topic", $_POST)) {
+		$topic = strtolower($_POST["topic"]);
+	} else {
+		$topic = "general";
+	}
+
+	$topic = string_clean($topic, "[a-z][0-9]-");
+	$topic = clean_url($topic);
+
+	if (strlen($topic) > 20) {
+		$topic = substr($topic, 0, 20);
+	}
+
+	return $topic;
+}
+
+
+function clean_slug()
+{
+	$slug = http_post_string("slug", array("required" => false, "len" => 100, "valid" => "[a-z][A-Z][0-9]-_."));
+	if ($slug == "") {
+		$slug = http_get_string("slug", array("required" => false, "len" => 100, "valid" => "[a-z][A-Z][0-9]-_."));
+	}
+	if ($slug == "") {
+		$slug = clean_url(clean_subject());
+	}
+
+	return $slug;
+}
+
+
+function clean_body($required = true, $definition = "comment")
+{
+	global $auth_user;
+
+	if (array_key_exists("body", $_POST)) {
+		$dirty_body = $_POST["body"];
+	} else if (array_key_exists("comment", $_POST)) {
+		$dirty_body = $_POST["comment"];
+	} else if (array_key_exists("story", $_POST)) {
+		$dirty_body = $_POST["story"];
+	} else {
+		if ($required) {
+			fatal("No body");
+		} else {
+			return array("", "");
+		}
+	}
+
+	// XXX: ugly hack while submit/publish story is not wysiwyg
+	if ($auth_user["javascript_enabled"] && $auth_user["wysiwyg_enabled"] && !array_key_exists("topic_id", $_POST)) {
+		$clean_body = $dirty_body;
+	} else {
+		$clean_body = str_replace("\n", "<br>", $dirty_body);
+	}
+	$clean_body = clean_html($clean_body, $definition);
+	$dirty_body = dirty_html($clean_body);
+	// XXX: ugly hack while submit/publish story is not wysiwyg
+	if ($auth_user["javascript_enabled"] && $auth_user["wysiwyg_enabled"] && !array_key_exists("topic_id", $_POST)) {
+		$dirty_body = $clean_body;
+	}
+
+	if (strlen($clean_body) > 16384) {
+		$clean_body = substr($clean_body, 0, 16384);
+		$clean_body = clean_html($clean_body, $definition);
+	}
+	if (strlen($clean_body) == 0) {
+		if ($required) {
+			fatal("No body");
+		} else {
+			return array("", "");
+		}
+	}
+
+	return array($clean_body, $dirty_body);
+}
+
+
+function clean_link()
+{
+	if (!array_key_exists("link", $_POST)) {
+		return "";
+	}
+
+	$link = $_POST["link"];
+	$link = string_clean($link, "[a-z][A-Z][0-9]~#%&()-_+=[];:./?");
+
+	return $link;
+}
+
+
+function clean_tags()
+{
+	if (!array_key_exists("tags", $_POST)) {
+		return array();
+	}
+
+	$tags = $_POST["tags"];
+	$tags = strtolower($tags);
+	$tags = str_replace(",", " ", $tags);
+	$tags = string_clean($tags, "[a-z][0-9] ");
+	$tags = explode(" ", $tags);
+
+	if (array_key_exists("body", $_POST)) {
+		$body = $_POST["body"];
+		$body = strip_tags($body);
+		$body = strtolower($body);
+		$body = string_clean($body, "[a-z][0-9]# ");
+		$a = explode(" ", $body);
+		for ($i = 0; $i < count($a); $i++) {
+			$tag = $a[$i];
+			if (substr($tag, 0, 1) == "#") {
+				$tags[] = string_clean(substr($tag, 1), "[a-z][0-9]");
+			}
+		}
+	}
+
+	$a = array_unique($tags);
+	$tags = array();
+	for ($i = 0; $i < count($a); $i++) {
+		if (strlen(string_clean($a[$i], "[a-z]")) > 0) {
+			$tags[] = substr($a[$i], 0, 20);
+		}
+		if (count($tags) == 3) {
+			return $tags;
+		}
+	}
+
+	return $tags;
+}
+
+
+function make_description($body)
+{
+	$desc = $body;
+
+	if (string_has($desc, "<br>")) {
+		$desc = substr($desc, 0, strpos($desc, "<br>"));
+	}
+	if (string_has($desc, "<blockquote>")) {
+		$desc = substr($desc, 0, strpos($desc, "<blockquote>"));
+	}
+	if (string_has($desc, "<pre>")) {
+		$desc = substr($desc, 0, strpos($desc, "<pre>"));
+	}
+	if (string_has($desc, "<ul>")) {
+		$desc = substr($desc, 0, strpos($desc, "<ul>"));
+	}
+	if (string_has($desc, "<ol>")) {
+		$desc = substr($desc, 0, strpos($desc, "<ol>"));
+	}
+
+	$config = HTMLPurifier_Config::createDefault();
+	$config->set('HTML.DefinitionID', "description");
+	$config->set('HTML.DefinitionRev', 1);
+	$config->set('Cache.DefinitionImpl', null); // TODO: remove this later!
+	$config->set('HTML.Allowed', '');
+	$config->set('Core.HiddenElements', array("sub" => true, "sup" => true));
+
+	$purifier = new HTMLPurifier($config);
+	$desc = $purifier->purify($desc);
+
+	return trim($desc);
 }
